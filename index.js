@@ -1,101 +1,135 @@
-import express from 'express';
-import path from 'path';
-import session from 'express-session';
-import cookieParser from 'cookie-parser';
-
+const express = require('express');
+const session = require('express-session');
 const app = express();
-const porta = 3000;
+
+app.use(express.urlencoded({ extended: true }));
+app.use(
+    session({
+        secret: 'chave-secreta',
+        resave: false,
+        saveUninitialized: true,
+        cookie: {
+            httpOnly: true,  // Aumenta a segurança, não permite acesso ao cookie via JavaScript
+            secure: false,   // Se usar HTTPS, deve ser 'true'. Para teste em HTTP, 'false'.
+            maxAge: 1000 * 60 * 60 * 24 // Define o tempo de vida do cookie como 1 dia
+        }
+    })
+);
+
+const porta = 3001;
 const host = '0.0.0.0';
 
-// Armazenamento em memória (substitua com um banco de dados na prática)
-let listaUsuarios = []; // [{ username, password }]
-let mensagens = []; // [{ sender, receiver, message, timestamp }]
-
-app.use(session({
-    secret: 'M1nh4Chav3S3cr3t4',
-    resave: false,
-    saveUninitialized: true,
-    cookie: { secure: false, httpOnly: true, maxAge: 1000 * 60 * 30 }
-}));
-
-app.use(cookieParser());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-app.use(express.static(path.join(process.cwd(), 'public')));
-
-// Middleware de autenticação
+// Função para verificar autenticação
 function verificarAutenticacao(req, resp, next) {
-    if (req.session.usuarioLogado) next();
-    else resp.redirect('/login.html');
+    console.log('Verificando autenticação:', req.session.autenticado);  // Log para verificar a sessão
+    if (req.session.autenticado) {
+        next();
+    } else {
+        resp.redirect('/login');
+    }
 }
 
-// Cadastro de usuário
-app.post('/register', (req, resp) => {
-    const { username, password } = req.body;
-    if (listaUsuarios.find(user => user.username === username)) {
-        return resp.status(400).send('Usuário já cadastrado.');
-    }
-    listaUsuarios.push({ username, password });
-    resp.redirect('/login.html');
-});
-
-// Autenticação de login
-app.post('/login', (req, resp) => {
-    const { username, password } = req.body;
-    const usuario = listaUsuarios.find(user => user.username === username && user.password === password);
-    if (!usuario) {
-        return resp.status(401).send(`
-            <div>
-                <p>Usuário ou senha inválidos!</p>
-                <a href="/login.html">Voltar ao login</a>
-            </div>
-        `);
-    }
-    req.session.usuarioLogado = username;
-    resp.redirect('/chat');
-});
-
-// Logout
-app.get('/logout', (req, resp) => {
-    req.session.destroy();
-    resp.redirect('/login.html');
-});
-
-// Página do bate-papo
-app.get('/chat', verificarAutenticacao, (req, resp) => {
-    const usuarioLogado = req.session.usuarioLogado;
+// Rota de login
+app.get('/login', (req, resp) => {
     resp.send(`
         <html>
-            <head>
-                <title>Bate-papo</title>
-            </head>
-            <body>
-                <h1>Bem-vindo, ${usuarioLogado}!</h1>
-                <div id="chat">
-                    ${mensagens.map(msg => `<p><strong>${msg.sender}:</strong> ${msg.message}</p>`).join('')}
-                </div>
-                <form id="form-mensagem" method="POST" action="/sendMessage">
-                    <input type="text" name="message" placeholder="Digite sua mensagem" required />
-                    <button type="submit">Enviar</button>
-                </form>
-                <a href="/logout">Sair</a>
-            </body>
+        <head>
+            <title>Login</title>
+        </head>
+        <body>
+            <h1>Login</h1>
+            <form action='/login' method='POST'>
+                <label for="usuario">Usuário:</label>
+                <input type="text" id="usuario" name="usuario" required><br>
+                <label for="senha">Senha:</label>
+                <input type="password" id="senha" name="senha" required><br>
+                <button type="submit">Login</button>
+            </form>
+        </body>
         </html>
     `);
 });
 
-// Enviar mensagem
-app.post('/sendMessage', verificarAutenticacao, (req, resp) => {
-    const sender = req.session.usuarioLogado;
-    const { message } = req.body;
-
-    if (!message.trim()) return resp.status(400).send('Mensagem não pode estar vazia.');
-
-    mensagens.push({ sender, message, timestamp: new Date() });
-    resp.redirect('/chat');
+app.post('/login', (req, resp) => {
+    const { usuario, senha } = req.body;
+    if (usuario === 'admin' && senha === '123') {
+        req.session.autenticado = true;
+        console.log("Usuário autenticado:", req.session.autenticado);  // Log para verificar se a autenticação foi bem-sucedida
+        resp.redirect('/');
+    } else {
+        resp.send('Usuário ou senha inválidos. <a href="/login">Tente novamente</a>');
+    }
 });
 
-// Inicializar servidor
+app.get('/logout', (req, resp) => {
+    req.session.destroy(() => {
+        console.log('Sessão destruída');
+        resp.redirect('/login');
+    });
+});
+
+// Página inicial com menu
+app.get('/', verificarAutenticacao, (req, resp) => {
+    resp.send(`
+        <html>
+        <head>
+            <title>Menu</title>
+        </head>
+        <body>
+            <h1>Bem-vindo!</h1>
+            <a href="/formulario">Preencher Informações Pessoais</a><br>
+            <a href="/logout">Logout</a>
+        </body>
+        </html>
+    `);
+});
+
+// Formulário de informações pessoais
+app.get('/formulario', verificarAutenticacao, (req, resp) => {
+    resp.send(`
+        <html>
+        <head>
+            <title>Informações Pessoais</title>
+        </head>
+        <body>
+            <h1>Preencha suas informações</h1>
+            <form action="/formulario" method="POST">
+                <label for="nome">Nome:</label>
+                <input type="text" id="nome" name="nome" required><br>
+
+                <label for="dataNascimento">Data de Nascimento:</label>
+                <input type="date" id="dataNascimento" name="dataNascimento" required><br>
+
+                <label for="nickname">Nickname:</label>
+                <input type="text" id="nickname" name="nickname" required><br>
+
+                <button type="submit">Enviar</button>
+            </form>
+        </body>
+        </html>
+    `);
+});
+
+// Receber e exibir informações enviadas
+app.post('/formulario', verificarAutenticacao, (req, resp) => {
+    const { nome, dataNascimento, nickname } = req.body;
+    resp.send(`
+        <html>
+        <head>
+            <title>Informações Recebidas</title>
+        </head>
+        <body>
+            <h1>Informações Enviadas</h1>
+            <p><strong>Nome:</strong> ${nome}</p>
+            <p><strong>Data de Nascimento:</strong> ${dataNascimento}</p>
+            <p><strong>Nickname:</strong> ${nickname}</p>
+            <a href="/">Voltar ao Menu</a>
+        </body>
+        </html>
+    `);
+});
+
+// Iniciar o servidor
 app.listen(porta, host, () => {
-    console.log(`Servidor iniciado e em execução no endereço http://${host}:${porta}`);
+    console.log(`Servidor rodando em http://${host}:${porta}`);
 });
